@@ -194,7 +194,7 @@ body:not(.no-sidebar):not(.focus) .tb-left, body:not(.no-sidebar):not(.focus) .t
 body.focus #topbar { opacity: 0; }
 body.focus #topbar:hover { opacity: 1; }
 
-#scroller { flex: 1; overflow-y: auto; overflow-x: auto; padding: 4px 24px 45vh; transition: padding .4s; }
+#scroller { flex: 1; overflow-y: auto; overflow-x: auto; padding: 4px 24px 0; transition: padding .4s; overscroll-behavior: none; }
 @container desk (min-width: 1140px) {
   body.board-on:not(.focus) #scroller { padding-right: 300px; }
   body.board-on:not(.focus) #board { display: flex; }
@@ -207,7 +207,11 @@ body.focus #topbar:hover { opacity: 1; }
   padding: 6.25em 10ch 8em 15ch; position: relative; border-radius: 4px; box-shadow: var(--paper-shadow);
   transition: background-color .6s, color .3s, box-shadow .6s;
 }
-#paper { min-height: calc(var(--script-size) * 1.25 * 66 + 14.25em); }
+/* La feuille descend toujours jusqu'en bas de l'écran : pas de bande vide sous le texte */
+#paper {
+  margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+  padding-bottom: 45vh; min-height: calc(100vh - 68px);
+}
 #script { outline: none; min-height: 20em; caret-color: var(--caret); }
 #script .b { position: relative; white-space: pre-wrap; overflow-wrap: break-word; width: 60ch; min-height: var(--lh); }
 #script .b.scene, #script .b.action, #script .b.character, #script .b.transition,

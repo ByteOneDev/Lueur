@@ -30,22 +30,32 @@ async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, Strin
     }))
 }
 
-/// Télécharge la mise à jour (signature vérifiée), remplace l'app puis redémarre.
+/// Télécharge la mise à jour (signature vérifiée) et remplace l'app.
+/// Avec `restart`, relance immédiatement ; sinon la nouvelle version s'ouvrira au prochain lancement.
+/// Retourne la version installée, ou None s'il n'y avait rien à installer.
 #[tauri::command]
-async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+async fn install_update(app: tauri::AppHandle, restart: bool) -> Result<Option<String>, String> {
     let update = app
         .updater()
         .map_err(|e| e.to_string())?
         .check()
         .await
         .map_err(|e| e.to_string())?;
-    if let Some(u) = update {
-        u.download_and_install(|_, _| {}, || {})
-            .await
-            .map_err(|e| e.to_string())?;
+    let Some(u) = update else { return Ok(None) };
+    let version = u.version.clone();
+    u.download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    if restart {
         app.restart();
     }
-    Ok(())
+    Ok(Some(version))
+}
+
+/// Relance l'app (après une mise à jour installée en arrière-plan).
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
 }
 
 /// Ouvre le panneau « Enregistrer sous… » natif et écrit le fichier choisi.
@@ -107,7 +117,8 @@ fn main() {
             save_file,
             open_text_file,
             check_update,
-            install_update
+            install_update,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("Lueur n'a pas pu démarrer");

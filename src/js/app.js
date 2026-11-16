@@ -433,6 +433,7 @@
       ${sw('sceneNumbers', 'Numéros de scène')}
       ${sw('typeSounds', 'Sons de machine à écrire')}
       ${sw('board', 'Notes et image à droite')}
+      ${sw('autoUpdate', 'Mises à jour automatiques')}
       <div class="sep"></div>
       <div class="keys">
         <div><kbd>⇥</kbd>changer d’élément (action → personnage…)</div>
@@ -446,43 +447,51 @@
   }
 
   /* ───────── Mises à jour (GitHub Releases) ───────── */
+  // Par défaut (réglage « Mises à jour automatiques ») : téléchargement + installation en arrière-plan,
+  // puis « Redémarrer » quand on veut — sinon la nouvelle version s'ouvre au prochain lancement.
   const Updater = {
-    version: '', busy: false,
+    version: '', busy: false, installed: null,
     async init() {
       if (!TAURI) return;
       try { this.version = await TAURI.app.getVersion(); } catch (e) { /* ignore */ }
-      $('#updateGo').onclick = () => this.install();
+      $('#updateGo').onclick = () => (this.installed ? this.restart() : this.install(true));
       $('#updateLater').onclick = () => $('#updateBar').classList.add('hidden');
-      setTimeout(() => this.check(true), 5000);
-      setInterval(() => this.check(true), 6 * 3600 * 1000);
+      setTimeout(() => this.check(true), 4000);
+      setInterval(() => this.check(true), 3 * 3600 * 1000);
+    },
+    bar(text, button) {
+      $('#updateText').textContent = text;
+      $('#updateGo').disabled = false;
+      $('#updateGo').textContent = button;
+      $('#updateBar').classList.remove('hidden');
     },
     async check(silent) {
       if (!TAURI) { if (!silent) toast('Les mises à jour se font depuis l’app installée.'); return; }
       if (this.busy) return;
+      if (this.installed) { this.bar(`Lueur ${this.installed} est installée`, 'Redémarrer'); return; }
       try {
         const u = await invoke('check_update');
-        if (u) {
-          $('#updateText').textContent = `Lueur ${u.version} est disponible`;
-          $('#updateGo').disabled = false;
-          $('#updateGo').textContent = 'Installer et redémarrer';
-          $('#updateBar').classList.remove('hidden');
-        } else if (!silent) toast(`Lueur est à jour (${this.version})`);
+        if (!u) { if (!silent) toast(`Lueur est à jour (${this.version})`); return; }
+        if (S.autoUpdate) this.install(false);
+        else this.bar(`Lueur ${u.version} est disponible`, 'Installer et redémarrer');
       } catch (e) {
         if (!silent) toast('Vérification impossible : ' + e);
       }
     },
-    async install() {
+    async install(restart) {
+      if (this.busy) return;
       this.busy = true;
       saveNow();
-      $('#updateGo').disabled = true;
-      $('#updateGo').textContent = 'Téléchargement…';
-      try { await invoke('install_update'); }
-      catch (e) {
-        toast('Mise à jour impossible : ' + e);
-        $('#updateGo').disabled = false;
-        $('#updateGo').textContent = 'Réessayer';
+      if (restart) { $('#updateGo').disabled = true; $('#updateGo').textContent = 'Téléchargement…'; }
+      try {
+        const v = await invoke('install_update', { restart });
+        if (v && !restart) { this.installed = v; this.bar(`Lueur ${v} est installée`, 'Redémarrer'); }
+      } catch (e) {
+        if (restart) { toast('Mise à jour impossible : ' + e); this.bar('La mise à jour a échoué', 'Réessayer'); }
+        else console.warn('Lueur: mise à jour en arrière-plan impossible', e);
       } finally { this.busy = false; }
     },
+    restart() { saveNow(); invoke('restart_app'); },
   };
 
   /* ───────── Lecteur ───────── */
