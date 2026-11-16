@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lueur</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#ECE8E2">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-theme="day" class="board-on">
+<div id="glow"></div>
+
+<div id="themePicker" class="hidden" role="radiogroup" aria-label="Lumière">
+  <button data-theme="day">Jour</button>
+  <button data-theme="evening">Soir</button>
+  <button data-theme="night">Nuit</button>
+</div>
+
+<div id="app">
+  <!-- ───────── Bibliothèque ───────── -->
+  <section id="library" class="view hidden">
+    <div class="drag-strip" data-tauri-drag-region></div>
+    <button class="tbtn lib-lamp" data-action="theme" title="Lumière">
+      <svg viewBox="0 0 18 18"><path d="M6.2 3h5.6l1.7 5.2H4.5z"/><path d="M9 8.2V15M6.5 15h5"/></svg><span class="themeName">Jour</span>
+    </button>
+    <div class="lib">
+      <header class="lib-head">
+        <img class="logo" src="assets/logo.svg" alt="">
+        <div><h1>Lueur</h1><p>Écrire à la lueur de la lampe.</p></div>
+      </header>
+      <div class="lib-actions">
+        <button class="btn primary" id="newScript">Nouveau scénario</button>
+        <button class="btn" id="importBtn">Importer un fichier .fountain</button>
+      </div>
+      <div id="libList"></div>
+    </div>
+  </section>
+
+  <!-- ───────── Écriture ───────── -->
+  <section id="writer" class="view hidden">
+    <aside id="sidebar">
+      <div class="sb-top" data-tauri-drag-region>
+        <button class="back" data-action="library"><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Bibliothèque</button>
+      </div>
+      <div class="tabs">
+        <button class="tab on" data-tab="scenes">Scènes</button>
+        <button class="tab" data-tab="characters">Personnages</button>
+        <button class="tab" data-tab="notes">Notes</button>
+        <button class="tab-search" id="searchToggle" title="Rechercher (⌘F)"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="m10.3 10.3 3.2 3.2"/></svg></button>
+      </div>
+      <div class="search hidden" id="searchBox"><input id="searchInput" type="text" placeholder="Rechercher dans le scénario…" autocomplete="off" spellcheck="false"></div>
+      <div class="sb-body">
+        <div class="pane" data-pane="scenes" id="sceneList"></div>
+        <div class="pane hidden" data-pane="characters" id="charList"></div>
+        <div class="pane hidden" data-pane="notes">
+          <div id="noteList"></div>
+          <input id="noteAdd" class="note-add" type="text" placeholder="Ajouter une note…" autocomplete="off">
+        </div>
+      </div>
+      <div class="sb-foot">
+        <label class="check"><input type="checkbox" id="titleToggle"> Page de titre</label>
+        <span id="stats">1 page · ~1 min</span>
+      </div>
+    </aside>
+
+    <main id="desk">
+      <header id="topbar" data-tauri-drag-region>
+        <button class="tbtn tb-left" data-action="library"><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Bibliothèque</button>
+        <div class="tb-center"><span id="docTitle" contenteditable="plaintext-only" spellcheck="false"></span><span id="docMeta"></span></div>
+        <span class="status" id="status"><i></i><span>Enregistré</span></span>
+        <button class="tbtn" data-action="sidebar" title="Panneau latéral (⌘\)"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.2" width="13" height="11.6" rx="2"/><path d="M7 3.2v11.6"/></svg></button>
+        <button class="tbtn" data-action="player" title="Ambiance sonore"><svg viewBox="0 0 18 18"><path d="M3 7h2.4L9 4.2v9.6L5.4 11H3z"/><path d="M11.8 6.6a3.4 3.4 0 0 1 0 4.8M13.9 4.6a6.2 6.2 0 0 1 0 8.8"/></svg></button>
+        <button class="tbtn" data-action="export" title="Exporter"><svg viewBox="0 0 18 18"><path d="M9 3v8.2M5.6 7.9 9 11.3l3.4-3.4M3.5 14.5h11"/></svg></button>
+        <button class="tbtn" data-action="settings" title="Réglages (⌘,)"><svg viewBox="0 0 18 18"><path d="M3 5.5h7.5M14 5.5h1M3 12.5h1M7.5 12.5H15"/><circle cx="12.2" cy="5.5" r="1.7"/><circle cx="5.8" cy="12.5" r="1.7"/></svg></button>
+        <button class="tbtn" data-action="theme" title="Lumière"><svg viewBox="0 0 18 18"><path d="M6.2 3h5.6l1.7 5.2H4.5z"/><path d="M9 8.2V15M6.5 15h5"/></svg><span class="themeName">Jour</span></button>
+        <button class="tbtn" data-action="focus" title="Mode concentration (⌘⇧F)"><svg viewBox="0 0 18 18" class="i-expand"><path d="M11 3h4v4M7 15H3v-4M15 3l-4.6 4.6M3 15l4.6-4.6"/></svg></button>
+      </header>
+
+      <div id="scroller">
+        <div id="titlePage" class="paper titlepage hidden">
+          <div class="tp-main">
+            <div class="tp-title" contenteditable="plaintext-only" data-k="title" data-ph="TITRE"></div>
+            <div class="tp-info">
+              <select id="tpFormat" class="tp-format" title="Format">
+                <option value="">Format</option>
+                <option>Long métrage</option>
+                <option>Court métrage</option>
+                <option>Série</option>
+                <option>Épisode</option>
+                <option>Pilote</option>
+                <option>Mini-série</option>
+                <option>Téléfilm</option>
+                <option>Clip</option>
+              </select>
+              <span class="tp-dot">·</span>
+              <span class="tp-genre" contenteditable="plaintext-only" data-k="genre" data-ph="Genre" spellcheck="false"></span>
+              <span class="tp-dot">·</span>
+              <span class="tp-duration" id="tpDuration" title="Estimation : 1 page ≈ 1 minute. Se met à jour pendant l’écriture.">≈ 1 min</span>
+            </div>
+            <div class="tp-credit" contenteditable="plaintext-only" data-k="credit" data-ph="Écrit par"></div>
+            <div class="tp-author" contenteditable="plaintext-only" data-k="author" data-ph="Votre nom"></div>
+          </div>
+          <div class="tp-foot">
+            <div class="tp-contact" contenteditable="plaintext-only" data-k="contact" data-ph="Contact"></div>
+            <div class="tp-date" contenteditable="plaintext-only" data-k="date" data-ph="Version · date"></div>
+          </div>
+        </div>
+        <div class="paper" id="paper">
+          <div id="pageMarks"></div>
+          <button id="typeHint" tabindex="-1"></button>
+          <div id="script" contenteditable="true" spellcheck="true" autocapitalize="off" lang="fr"></div>
+          <div id="endHint">Cliquez ici et continuez d’écrire…</div>
+        </div>
+      </div>
+
+      <aside id="board">
+        <div class="sticky" id="sticky">
+          <div id="stickyList"></div>
+          <input id="stickyAdd" type="text" placeholder="+ note" autocomplete="off">
+        </div>
+        <div class="polaroid" id="polaroid" title="Cliquez pour choisir une image d’inspiration">
+          <div class="img" id="polaroidImg"></div>
+          <button class="pol-x hidden" id="polaroidReset" title="Retirer l’image">×</button>
+        </div>
+      </aside>
+    </main>
+
+    <div id="player">
+      <button class="p-play" id="pPlay" aria-label="Lecture / pause">
+        <svg class="i-play" viewBox="0 0 18 18"><path d="M6.3 4.2v9.6l7.4-4.8z" fill="currentColor" stroke="none"/></svg>
+        <svg class="i-pause" viewBox="0 0 18 18"><rect x="5" y="4" width="2.6" height="10" rx="1" fill="currentColor" stroke="none"/><rect x="10.4" y="4" width="2.6" height="10" rx="1" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <div class="p-info">
+        <div class="p-title"><i></i><span id="pTitle">Route de nuit</span></div>
+        <div class="p-time" id="pTime">0:00 / 2:05</div>
+      </div>
+      <div class="p-bars" id="pBars"></div>
+      <button class="p-skip" id="pPrev" title="Ambiance précédente"><svg viewBox="0 0 18 18"><path d="M8.5 5 4.8 9l3.7 4M13.5 5 9.8 9l3.7 4"/></svg></button>
+      <button class="p-skip" id="pNext" title="Ambiance suivante"><svg viewBox="0 0 18 18"><path d="M9.5 5l3.7 4-3.7 4M4.5 5l3.7 4-3.7 4"/></svg></button>
+    </div>
+  </section>
+</div>
+
+<div id="ac" class="hidden" role="listbox"></div>
+<div id="typeMenu" class="pop hidden"></div>
+<div id="exportMenu" class="pop hidden">
+  <button class="item" data-export="fountain"><span>Fountain</span><small>.fountain</small></button>
+  <button class="item" data-export="pdf"><span>PDF</span><small>.pdf</small></button>
+  <button class="item" data-export="md"><span>Markdown</span><small>.md</small></button>
+</div>
+<div id="settingsPop" class="pop settings hidden"></div>
+<div id="toast" class="hidden"></div>
+<div id="updateBar" class="hidden" role="status">
+  <img src="assets/logo.svg" alt="">
+  <span id="updateText"></span>
+  <button id="updateGo">Installer et redémarrer</button>
+  <button id="updateLater" title="Plus tard">×</button>
+</div>
+<input type="file" id="fileImport" accept=".fountain,.spmd,.txt,.md,text/plain" hidden>
+<input type="file" id="fileImage" accept="image/*" hidden>
+
+<script src="js/store.js"></script>
+<script src="js/fountain.js"></script>
+<script src="js/paginate.js"></script>
+<script src="js/pdf.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
