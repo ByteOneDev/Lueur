@@ -30,7 +30,7 @@
         <div><h1>Lueur</h1><p>Écrire à la lueur de la lampe.</p></div>
       </header>
       <div class="lib-actions">
-        <button class="btn primary" id="newScript">Nouveau scénario</button>
+        <button class="btn primary" id="newScript">Nouveau…</button>
         <button class="btn" id="importBtn">Importer un fichier .fountain</button>
       </div>
       <div id="libList"></div>
@@ -43,23 +43,26 @@
       <div class="sb-top" data-tauri-drag-region>
         <button class="back" data-action="library"><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Bibliothèque</button>
       </div>
-      <div class="tabs">
+      <div class="bible-only sb-head"><span>Sections</span><button class="tab-search" data-addsec-menu title="Ajouter une section">+</button></div>
+      <div class="tabs script-only">
         <button class="tab on" data-tab="scenes">Scènes</button>
         <button class="tab" data-tab="characters">Personnages</button>
         <button class="tab" data-tab="notes">Notes</button>
         <button class="tab-search" id="searchToggle" title="Rechercher (⌘F)"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="m10.3 10.3 3.2 3.2"/></svg></button>
       </div>
-      <div class="search hidden" id="searchBox"><input id="searchInput" type="text" placeholder="Rechercher dans le scénario…" autocomplete="off" spellcheck="false"></div>
+      <div class="search script-only hidden" id="searchBox"><input id="searchInput" type="text" placeholder="Rechercher dans le scénario…" autocomplete="off" spellcheck="false"></div>
       <div class="sb-body">
-        <div class="pane" data-pane="scenes" id="sceneList"></div>
-        <div class="pane hidden" data-pane="characters" id="charList"></div>
-        <div class="pane hidden" data-pane="notes">
+        <div class="bible-only" id="bibleNav"></div>
+        <div class="pane script-only" data-pane="scenes" id="sceneList"></div>
+        <div class="pane script-only hidden" data-pane="characters" id="charList"></div>
+        <div class="pane script-only hidden" data-pane="notes">
           <div id="noteList"></div>
           <input id="noteAdd" class="note-add" type="text" placeholder="Ajouter une note…" autocomplete="off">
         </div>
       </div>
       <div class="sb-foot">
-        <label class="check"><input type="checkbox" id="titleToggle"> Page de titre</label>
+        <label class="check script-only"><input type="checkbox" id="titleToggle"> Page de titre</label>
+        <span class="bible-only" id="bibleKind">Bible</span>
         <span id="stats">1 page · ~1 min</span>
       </div>
     </aside>
@@ -78,7 +81,8 @@
       </header>
 
       <div id="scroller">
-        <div id="titlePage" class="paper titlepage hidden">
+        <div id="bibleDoc" class="paper bible-paper bible-only"></div>
+        <div id="titlePage" class="paper titlepage script-only hidden">
           <div class="tp-main">
             <div class="tp-title" contenteditable="plaintext-only" data-k="title" data-ph="TITRE"></div>
             <div class="tp-info">
@@ -106,7 +110,7 @@
             <div class="tp-date" contenteditable="plaintext-only" data-k="date" data-ph="Version · date"></div>
           </div>
         </div>
-        <div class="paper" id="paper">
+        <div class="paper script-only" id="paper">
           <div id="pageMarks"></div>
           <button id="typeHint" tabindex="-1"></button>
           <div id="script" contenteditable="true" spellcheck="true" autocapitalize="off" lang="fr"></div>
@@ -114,7 +118,7 @@
         </div>
       </div>
 
-      <aside id="board">
+      <aside id="board" class="script-only">
         <div class="sticky" id="sticky">
           <div id="stickyList"></div>
           <input id="stickyAdd" type="text" placeholder="+ note" autocomplete="off">
@@ -145,11 +149,29 @@
 <div id="ac" class="hidden" role="listbox"></div>
 <div id="typeMenu" class="pop hidden"></div>
 <div id="exportMenu" class="pop hidden">
-  <button class="item" data-export="fountain"><span>Fountain</span><small>.fountain</small></button>
+  <button class="item script-only" data-export="fountain"><span>Fountain</span><small>.fountain</small></button>
   <button class="item" data-export="pdf"><span>PDF</span><small>.pdf</small></button>
   <button class="item" data-export="md"><span>Markdown</span><small>.md</small></button>
 </div>
 <div id="settingsPop" class="pop settings hidden"></div>
+<div id="sectionMenu" class="pop hidden">
+  <button class="item" data-addsec="text"><span>Texte</span><small>pitch, univers, épisodes…</small></button>
+  <button class="item" data-addsec="characters"><span>Personnages</span><small>fiches avec image</small></button>
+  <button class="item" data-addsec="gallery"><span>Galerie d’images</span><small>designs, décors, moodboard</small></button>
+  <button class="item" data-addsec="palette"><span>Palette de couleurs</span><small>nuancier</small></button>
+</div>
+<div id="newDoc" class="modal hidden" role="dialog" aria-label="Nouveau document">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="kind-pill">
+        <button data-kind="script" class="on">Scénario</button>
+        <button data-kind="bible">Bible littéraire &amp; graphique</button>
+      </div>
+      <button class="modal-x" data-close title="Fermer">×</button>
+    </div>
+    <div class="tpl-grid" id="tplGrid"></div>
+  </div>
+</div>
 <div id="toast" class="hidden"></div>
 <div id="updateBar" class="hidden" role="status">
   <img src="assets/logo.svg" alt="">
@@ -159,13 +181,17 @@
 </div>
 <input type="file" id="fileImport" accept=".fountain,.spmd,.txt,.md,text/plain" hidden>
 <input type="file" id="fileImage" accept="image/*" hidden>
+<input type="file" id="bibleFile" accept="image/*" hidden>
 
 <script src="js/store.js"></script>
+<script src="js/templates.js"></script>
+<script src="js/images.js"></script>
 <script src="js/fountain.js"></script>
 <script src="js/paginate.js"></script>
 <script src="js/pdf.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/bible.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

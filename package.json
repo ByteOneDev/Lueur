@@ -1,7 +1,7 @@
 {
   "name": "lueur",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Lueur — un outil d'écriture de scénario minimaliste",
   "scripts": {
     "web": "node scripts/serve.mjs",

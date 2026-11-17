@@ -18,12 +18,26 @@ const Store = (() => {
   };
 
   function blank(partial = {}) {
+    const meta = Object.assign({ credit: 'Écrit par', author: '', contact: '', date: '', format: '', genre: '' }, partial.meta || {});
     return Object.assign({
-      id: uid(), title: 'Sans titre', titlePage: false,
+      id: uid(), kind: 'script', title: 'Sans titre', titlePage: false,
       meta: { credit: 'Écrit par', author: '', contact: '', date: '', format: '', genre: '' },
       blocks: [{ t: 'scene', x: '' }], notes: [], colors: {}, image: null,
       createdAt: Date.now(), updatedAt: Date.now(), pages: 1,
-    }, partial);
+    }, partial, { meta });
+  }
+  function blankBible(partial = {}) {
+    const meta = Object.assign({ credit: 'Écrit par', author: '', format: '', genre: '' }, partial.meta || {});
+    return Object.assign({
+      id: uid(), kind: 'bible', title: 'Sans titre', sections: [],
+      createdAt: Date.now(), updatedAt: Date.now(), pages: 0,
+    }, partial, { meta, kind: 'bible' });
+  }
+  /** Toutes les images référencées par une bible (pour les supprimer avec elle) */
+  function bibleImages(b) {
+    const ids = [];
+    (b.sections || []).forEach(s => (s.items || []).forEach(it => it.img && ids.push(it.img)));
+    return ids;
   }
 
   return {
@@ -36,16 +50,27 @@ const Store = (() => {
       s.updatedAt = Date.now();
       const ok = save('script.' + s.id, s);
       const idx = this.index().filter(x => x.id !== s.id);
-      idx.unshift({ id: s.id, title: s.title, updatedAt: s.updatedAt, pages: s.pages || 1 });
+      idx.unshift({ id: s.id, kind: s.kind || 'script', title: s.title, updatedAt: s.updatedAt, pages: s.pages || 0, info: s.info || '' });
       save('index', idx);
       return ok;
     },
     deleteScript(id) {
+      const doc = this.getScript(id);
+      if (doc && doc.kind === 'bible' && typeof Images !== 'undefined') Images.del(bibleImages(doc));
       try { localStorage.removeItem(K + 'script.' + id); } catch (e) { /* ignore */ }
       save('index', this.index().filter(x => x.id !== id));
     },
     create(partial) { const s = blank(partial); this.putScript(s); return s; },
+    createBible(partial) { const b = blankBible(partial); this.putScript(b); return b; },
     normalize(s) {
+      if (s.kind === 'bible') {
+        const b = blankBible();
+        s.meta = Object.assign({}, b.meta, s.meta || {});
+        s.sections = Array.isArray(s.sections) ? s.sections : [];
+        s.sections.forEach(x => { if (x.kind !== 'text') x.items = Array.isArray(x.items) ? x.items : []; });
+        return s;
+      }
+      s.kind = 'script';
       const b = blank();
       s.meta = Object.assign({}, b.meta, s.meta || {});
       s.blocks = Array.isArray(s.blocks) && s.blocks.length ? s.blocks : b.blocks;

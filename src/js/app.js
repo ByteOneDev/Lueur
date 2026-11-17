@@ -59,7 +59,8 @@
   function showLibrary() {
     if (script) saveNow();
     script = null; S.lastScript = null; Store.saveSettings(S);
-    closePops(); Editor.closeSuggest(); setFocus(false);
+    closePops(); Editor.closeSuggest(); setFocus(false); Bible.close();
+    document.body.classList.remove('mode-bible');
     $('#writer').classList.add('hidden');
     $('#library').classList.remove('hidden');
     renderLibrary();
@@ -67,12 +68,16 @@
   }
   function renderLibrary() {
     const idx = Store.index().sort((a, b) => b.updatedAt - a.updatedAt);
-    $('#libList').innerHTML = idx.length ? idx.map(s => `
+    $('#libList').innerHTML = idx.length ? idx.map(s => {
+      const bible = s.kind === 'bible';
+      const what = bible ? (s.info || 'Bible') : plural(s.pages || 1, 'page');
+      return `
       <div class="lib-item" data-open="${esc(s.id)}">
-        <div class="thumb"><i></i><i></i><i></i><i></i></div>
-        <div class="li-text"><h3>${esc(s.title || 'Sans titre')}</h3><p>${plural(s.pages || 1, 'page')} · ${ago(s.updatedAt)}</p></div>
+        <div class="thumb${bible ? ' bible' : ''}"><i></i><i></i><i></i><i></i></div>
+        <div class="li-text"><h3>${esc(s.title || 'Sans titre')}${bible ? '<span class="tag">Bible</span>' : ''}</h3><p>${esc(what)} · ${ago(s.updatedAt)}</p></div>
         <button class="del" data-del="${esc(s.id)}" title="Supprimer">×</button>
-      </div>`).join('') : '<p class="empty">Aucun scénario pour l’instant. Commencez une page blanche ou importez un fichier Fountain.</p>';
+      </div>`;
+    }).join('') : '<p class="empty">Aucun document pour l’instant. Commencez un scénario ou une bible, ou importez un fichier Fountain.</p>';
   }
   function openScript(id, opts = {}) {
     const s = Store.getScript(id);
@@ -81,6 +86,19 @@
     S.lastScript = id; Store.saveSettings(S);
     $('#library').classList.add('hidden');
     $('#writer').classList.remove('hidden');
+    closePops();
+    if (script.kind === 'bible') {
+      document.body.classList.add('mode-bible');
+      Editor.load([]);
+      $('#docTitle').textContent = script.title || '';
+      Bible.open(script);
+      document.title = (script.title || 'Sans titre') + ' — Lueur';
+      $('#scroller').scrollTop = 0;
+      setStatus('saved');
+      return;
+    }
+    document.body.classList.remove('mode-bible');
+    Bible.close();
     Editor.load(script.blocks);
     $('#docTitle').textContent = script.title || '';
     fillTitlePage();
@@ -95,10 +113,30 @@
     setStatus('saved');
     if (opts.focus) { Editor.focusBlock(0, 0, false); Editor.suggest(); }
   }
-  function newScript() {
-    const s = Store.create({ title: 'Sans titre' });
+  /* ───────── Nouveau document : scénario ou bible, à partir d’un modèle ───────── */
+  let newKind = 'script';
+  function showNewDoc(kind = newKind) {
+    newKind = kind;
+    $$('#newDoc .kind-pill button').forEach(b => b.classList.toggle('on', b.dataset.kind === kind));
+    $('#tplGrid').innerHTML = Templates[kind].map(t => `
+      <button class="tpl" data-tpl="${t.id}">
+        <div class="tpl-thumb ${kind}"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="tpl-name">${esc(t.name)}</div>
+        <div class="tpl-desc">${esc(t.desc)}</div>
+        ${t.meta ? `<div class="tpl-meta">${esc(t.meta)}</div>` : ''}
+      </button>`).join('');
+    $('#newDoc').classList.remove('hidden');
+  }
+  function createFrom(kind, id) {
+    const t = Templates[kind].find(x => x.id === id);
+    if (!t) return;
+    $('#newDoc').classList.add('hidden');
+    const data = t.make();
+    if (kind === 'bible') { const b = Store.createBible(data); openScript(b.id); return; }
+    const s = Store.create(data);
     openScript(s.id, { focus: true });
   }
+  function newScript() { showNewDoc(); }
 
   /* ───────── Données dérivées ───────── */
   function compute() {
@@ -168,7 +206,7 @@
   let refreshT = 0;
   function refresh() { clearTimeout(refreshT); refreshT = setTimeout(refreshNow, 140); }
   function refreshNow() {
-    if (!script) return;
+    if (!script || script.kind === 'bible') return;
     clearTimeout(refreshT);
     compute();
     Editor.decorate();
@@ -290,6 +328,7 @@
     script.title = t;
     if (from !== 'top') $('#docTitle').textContent = t;
     if (from !== 'page') { const el = $('#titlePage [data-k=title]'); if (el.textContent !== t) el.textContent = t; }
+    if (script.kind === 'bible' && from !== 'bible') Bible.syncTitle(t);
     document.title = (t || 'Sans titre') + ' — Lueur';
     scheduleSave();
   }
@@ -306,8 +345,13 @@
   function saveNow() {
     clearTimeout(saveT);
     if (!script) return;
-    script.blocks = Editor.blocks();
-    script.pages = D.pag ? Math.max(1, D.pag.pages.length) : 1;
+    if (script.kind === 'bible') {
+      const st = Bible.stats();
+      if (st) script.info = `${plural(st.sections, 'section')} · ${plural(st.words, 'mot')}` + (st.imgs ? ` · ${plural(st.imgs, 'image')}` : '');
+    } else {
+      script.blocks = Editor.blocks();
+      script.pages = D.pag ? Math.max(1, D.pag.pages.length) : 1;
+    }
     setStatus(Store.putScript(script) ? 'saved' : 'error');
   }
 
@@ -341,6 +385,15 @@
     saveNow();
     const name = fileBase(script.title), enc = new TextEncoder();
     try {
+      if (script.kind === 'bible') {
+        if (kind === 'md') await saveFile(name, 'md', 'Markdown', enc.encode(Bible.toMarkdown(script)), 'text/markdown');
+        else if (kind === 'pdf') {
+          toast('Création du PDF…');
+          const bytes = await Bible.pdf(script, { font: scriptFont(), paper: S.paper });
+          await saveFile(name, 'pdf', 'PDF', bytes, 'application/pdf');
+        }
+        return;
+      }
       if (kind === 'fountain') await saveFile(name, 'fountain', 'Fountain', enc.encode(Fountain.stringify(script)), 'text/plain');
       else if (kind === 'md') await saveFile(name, 'md', 'Markdown', enc.encode(Fountain.toMarkdown(script)), 'text/markdown');
       else if (kind === 'pdf') {
@@ -548,7 +601,7 @@
       else if (act === 'focus') setFocus(!document.body.classList.contains('focus'));
     });
     document.addEventListener('mousedown', e => {
-      if (openPop && !openPop.contains(e.target) && !e.target.closest('[data-action]') && !e.target.closest('#typeHint')) closePops();
+      if (openPop && !openPop.contains(e.target) && !e.target.closest('[data-action]') && !e.target.closest('#typeHint') && !e.target.closest('[data-addsec-menu]')) closePops();
       const tp = $('#themePicker');
       if (!tp.classList.contains('hidden') && !e.target.closest('#themePicker') && !e.target.closest('[data-action=theme]')) tp.classList.add('hidden');
     });
@@ -557,6 +610,24 @@
       if (!b) return;
       S.theme = b.dataset.theme; applySettings();
       setTimeout(() => $('#themePicker').classList.add('hidden'), 650);
+    });
+
+    // Nouveau document & modèles
+    $('#newDoc').addEventListener('click', e => {
+      if (e.target === $('#newDoc') || e.target.closest('[data-close]')) { $('#newDoc').classList.add('hidden'); return; }
+      const k = e.target.closest('[data-kind]');
+      if (k) { showNewDoc(k.dataset.kind); return; }
+      const t = e.target.closest('[data-tpl]');
+      if (t) createFrom(newKind, t.dataset.tpl);
+    });
+    // Bible : menu « ajouter une section » (barre latérale et bas du document)
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-addsec-menu]');
+      if (b && !b.closest('#bibleDoc')) togglePop('sectionMenu', b);
+    });
+    $('#sectionMenu').addEventListener('click', e => {
+      const b = e.target.closest('[data-addsec]');
+      if (b) { closePops(); Bible.addSection(b.dataset.addsec); }
     });
 
     // Bibliothèque
@@ -716,11 +787,13 @@
     document.addEventListener('keydown', e => {
       const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
       if (mod && k === 's') { e.preventDefault(); saveNow(); toast('Enregistré'); return; }
+      if (mod && k === 'n') { e.preventDefault(); if (script) showLibrary(); showNewDoc(); return; }
+      if (e.key === 'Escape' && !$('#newDoc').classList.contains('hidden')) { $('#newDoc').classList.add('hidden'); return; }
       if (!script) return;
       if (mod && k === 'p') { e.preventDefault(); exportAs('pdf'); return; }
       if (mod && k === '\\') { e.preventDefault(); S.sidebar = !S.sidebar; applySettings(); return; }
       if (mod && e.shiftKey && k === 'f') { e.preventDefault(); setFocus(!document.body.classList.contains('focus')); return; }
-      if (mod && !e.shiftKey && k === 'f') { e.preventDefault(); if (!S.sidebar) { S.sidebar = true; applySettings(); } if ($('#searchBox').classList.contains('hidden')) $('#searchToggle').click(); else $('#searchInput').focus(); return; }
+      if (mod && !e.shiftKey && k === 'f' && script.kind !== 'bible') { e.preventDefault(); if (!S.sidebar) { S.sidebar = true; applySettings(); } if ($('#searchBox').classList.contains('hidden')) $('#searchToggle').click(); else $('#searchInput').focus(); return; }
       if (mod && k === ',') { e.preventDefault(); renderSettings(); togglePop('settingsPop', $('[data-action=settings]')); return; }
       if (e.key === 'Escape') {
         if (openPop) { closePops(); return; }
@@ -731,7 +804,7 @@
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && !TAURI) document.body.classList.remove('focus'); });
     window.addEventListener('beforeunload', saveNow);
     document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
-    window.addEventListener('resize', () => { if (script) renderPageMarks(); });
+    window.addEventListener('resize', () => { if (script && script.kind !== 'bible') renderPageMarks(); });
   }
 
   function renameCharacter(old) {
@@ -767,6 +840,16 @@
       lang: () => S.lang,
       autocomplete: () => !!S.autocomplete,
       sound: k => { if (S.typeSounds) Sound.key(k); },
+    });
+    Bible.init({
+      onChange: () => { if (script && script.kind === 'bible') scheduleSave(); },
+      onTitle: t => setTitle(t, 'bible'),
+      onStats: st => {
+        $('#stats').textContent = `${plural(st.words, 'mot')}` + (st.imgs ? ` · ${plural(st.imgs, 'image')}` : '');
+        $('#docMeta').textContent = `Bible · ${plural(st.sections, 'section')}`;
+      },
+      sectionMenu: btn => togglePop('sectionMenu', btn),
+      toast,
     });
     Player.init();
     bind();

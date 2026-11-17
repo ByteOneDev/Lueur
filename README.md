@@ -45,6 +45,21 @@ export APPLE_TEAM_ID="TEAMID"
 npm run build
 ```
 
+## Deux types de documents
+
+**Nouveau…** (⌘N) dans la bibliothèque propose des modèles :
+
+- **Scénario** : page blanche, long métrage (3 actes, tournants en notes), court métrage, épisode de série,
+  pilote, ou le scénario d'exemple.
+- **Bible littéraire & graphique** : bible de série (complète), bible littéraire, bible graphique,
+  dossier de film, bible vierge.
+
+Une bible est une suite de sections que l'on ajoute, renomme et réordonne librement :
+**texte** (pitch, univers, épisodes… avec `# titres` et `- listes`), **personnages** (fiches avec image),
+**galerie d'images** (designs, décors, moodboard — glisser-déposer) et **palette de couleurs**.
+Export **PDF** (couverture, images, nuancier) et **Markdown**. Les images sont stockées dans la base
+interne de l'app (IndexedDB), réduites à 1600 px.
+
 ## Écrire
 
 | Touche | Effet |
