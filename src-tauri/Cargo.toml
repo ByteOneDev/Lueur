@@ -1,6 +1,6 @@
 [package]
 name = "lueur"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lueur — écriture de scénario"
 edition = "2021"
 
@@ -14,6 +14,8 @@ tauri-plugin-updater = "2"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+flate2 = "1"
+tar = "0.4"
 
 [profile.release]
 codegen-units = 1

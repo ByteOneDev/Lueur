@@ -43,13 +43,101 @@ async fn install_update(app: tauri::AppHandle, restart: bool) -> Result<Option<S
         .map_err(|e| e.to_string())?;
     let Some(u) = update else { return Ok(None) };
     let version = u.version.clone();
-    u.download_and_install(|_, _| {}, || {})
+    // Téléchargement + vérification de la signature (clé publique de tauri.conf.json)
+    let bytes = u
+        .download(|_, _| {}, || {})
         .await
         .map_err(|e| e.to_string())?;
+    // Installation « sur place » : on garde le dossier Lueur.app pour que l'icône épinglée du Dock
+    // reste associée à l'app. En cas d'échec, on retombe sur l'installation standard de Tauri.
+    if let Err(e) = install_in_place(&bytes) {
+        eprintln!("Lueur: installation sur place impossible ({e}), installation standard");
+        u.install(&bytes).map_err(|e| e.to_string())?;
+    }
     if restart {
         app.restart();
     }
     Ok(Some(version))
+}
+
+/// Remplace uniquement `Lueur.app/Contents` par celui de l'archive de mise à jour.
+/// Le dossier `Lueur.app` lui-même (et donc son identifiant de fichier) ne change pas :
+/// le Dock continue de reconnaître l'app épinglée après chaque mise à jour.
+#[cfg(target_os = "macos")]
+fn install_in_place(archive: &[u8]) -> Result<(), String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // …/Lueur.app/Contents/MacOS/lueur → …/Lueur.app
+    let bundle: PathBuf = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().map_or(false, |x| x == "app"))
+        .ok_or("bundle .app introuvable")?
+        .to_path_buf();
+    let contents = bundle.join("Contents");
+
+    // Dossier temporaire sur le même volume que l'app (pour pouvoir renommer sans copier)
+    let parent = bundle.parent().ok_or("dossier parent introuvable")?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let work = parent.join(format!(".lueur-update-{stamp}"));
+    fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let cleanup = |w: &PathBuf| {
+        let _ = fs::remove_dir_all(w);
+    };
+
+    // Décompression de l'archive (Lueur.app.tar.gz)
+    let gz = flate2::read::GzDecoder::new(archive);
+    if let Err(e) = tar::Archive::new(gz).unpack(&work) {
+        cleanup(&work);
+        return Err(format!("archive illisible : {e}"));
+    }
+    let new_app = fs::read_dir(&work)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().map_or(false, |x| x == "app"));
+    let Some(new_app) = new_app else {
+        cleanup(&work);
+        return Err("aucune app dans l'archive".into());
+    };
+    let new_contents = new_app.join("Contents");
+    if !new_contents.join("Info.plist").exists() {
+        cleanup(&work);
+        return Err("archive incomplète".into());
+    }
+
+    // Échange : ancien Contents → corbeille temporaire, nouveau Contents → à sa place
+    let old = work.join("Contents-old");
+    if let Err(e) = fs::rename(&contents, &old) {
+        cleanup(&work);
+        return Err(format!("remplacement impossible : {e}"));
+    }
+    if let Err(e) = fs::rename(&new_contents, &contents) {
+        let _ = fs::rename(&old, &contents); // retour arrière
+        cleanup(&work);
+        return Err(format!("remplacement impossible : {e}"));
+    }
+    cleanup(&work);
+
+    // Prévient Finder / LaunchServices que l'app a changé
+    let _ = std::process::Command::new("/usr/bin/touch").arg(&bundle).status();
+    let _ = std::process::Command::new(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    )
+    .arg("-f")
+    .arg(&bundle)
+    .status();
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_in_place(_archive: &[u8]) -> Result<(), String> {
+    Err("non pris en charge".into())
 }
 
 /// Relance l'app (après une mise à jour installée en arrière-plan).
@@ -110,6 +198,16 @@ async fn open_text_file(app: tauri::AppHandle) -> Result<Option<(String, String)
 }
 
 fn main() {
+    // Test local de l'installation sur place (uniquement en build de développement).
+    #[cfg(debug_assertions)]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.get(1).map(String::as_str) == Some("--test-apply-update") {
+            let bytes = std::fs::read(&args[2]).expect("archive");
+            println!("{:?}", install_in_place(&bytes));
+            return;
+        }
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
