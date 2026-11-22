@@ -10,7 +10,7 @@ const Fountain = (() => {
   const isTransition = s => isUpper(s) && (/TO:$/.test(s) || /^(FADE (IN|OUT)|FONDU|COUPE|ENCHA[IÎ]N|OUVERTURE|SMASH CUT|MATCH CUT|DISSOLVE)/.test(s));
 
   /** Nom du personnage sans extension : "LÉA (OFF)" → "LÉA" */
-  const speaker = x => String(x || '').toUpperCase().replace(/\^\s*$/, '').replace(/\s*\([^)]*\)?/g, '').trim();
+  const speaker = x => Rich.plain(String(x || '')).toUpperCase().replace(/\^\s*$/, '').replace(/\s*\([^)]*\)?/g, '').trim();
 
   /** Lieu et moment d’un intitulé : "INT. CUISINE - NUIT" → { loc: "CUISINE", time: "NUIT" } */
   function heading(x) {
@@ -111,7 +111,7 @@ const Fountain = (() => {
     return head.join('\n') + '\n\n' + fromBlocks(s.blocks) + '\n';
   }
 
-  const mdEsc = x => x.replace(/^([#>*+\-]|\d+\.)/, '\\$1');
+  const mdEsc = x => Rich.toMarkdown(x.replace(/^([#>]|[*+\-](?=\s)|\d+\.(?=\s))/, '\\$1'));
   function toMarkdown(s) {
     const m = s.meta || {};
     const out = ['# ' + (s.title || 'Sans titre')];
@@ -121,13 +121,14 @@ const Fountain = (() => {
     out.push('', '---');
     let n = 0, prev = null;
     for (const b of s.blocks) {
-      const x = String(b.x || '').trim();
-      if (!x) continue;
+      const raw = String(b.x || '').trim();
+      if (!raw) continue;
+      const x = b.t === 'scene' || b.t === 'character' || b.t === 'transition' ? Rich.plain(raw) : raw;
       const inDlg = prev && DLG.has(prev);
       switch (b.t) {
         case 'scene': n++; out.push('', `## ${n}. ${x.toUpperCase()}`); break;
         case 'character': out.push('', `**${x.toUpperCase()}**  `); break;
-        case 'paren': if (!inDlg) out.push(''); out.push(`*${x}*  `); break;
+        case 'paren': if (!inDlg) out.push(''); out.push(`*${Rich.plain(x)}*  `); break;
         case 'dialogue': if (!inDlg) out.push(''); out.push(mdEsc(x) + '  '); break;
         case 'transition': out.push('', `*${x.toUpperCase()}*`); break;
         default: out.push('', mdEsc(x));

@@ -13,7 +13,7 @@ const Store = (() => {
 
   const DEFAULTS = {
     theme: 'day', font: 'JetBrains Mono', customFont: '', fontSize: 15, lang: 'fr', paper: 'letter',
-    autocomplete: true, autoUpdate: true, sceneNumbers: true, typeSounds: false, board: true, sidebar: true, player: true,
+    autocomplete: true, autoUpdate: true, diskSave: false, diskDir: '', sceneNumbers: true, typeSounds: false, board: true, sidebar: true, player: true,
     lastScript: null, seeded: false,
   };
 

@@ -57,7 +57,7 @@
     return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
   }
   function showLibrary() {
-    if (script) saveNow();
+    if (script) { saveNow(); Disk.flush(); }
     script = null; S.lastScript = null; Store.saveSettings(S);
     closePops(); Editor.closeSuggest(); setFocus(false); Bible.close();
     document.body.classList.remove('mode-bible');
@@ -95,6 +95,7 @@
       document.title = (script.title || 'Sans titre') + ' — Lueur';
       $('#scroller').scrollTop = 0;
       setStatus('saved');
+      Disk.start();
       return;
     }
     document.body.classList.remove('mode-bible');
@@ -111,6 +112,7 @@
     document.title = (script.title || 'Sans titre') + ' — Lueur';
     $('#scroller').scrollTop = 0;
     setStatus('saved');
+    Disk.start();
     if (opts.focus) { Editor.focusBlock(0, 0, false); Editor.suggest(); }
   }
   /* ───────── Nouveau document : scénario ou bible, à partir d’un modèle ───────── */
@@ -339,9 +341,10 @@
     const el = $('#status');
     el.classList.toggle('dirty', st === 'dirty');
     el.classList.toggle('error', st === 'error');
-    el.lastElementChild.textContent = st === 'saved' ? 'Enregistré' : st === 'error' ? 'Non enregistré' : 'Modifié';
+    el.lastElementChild.textContent = st === 'saved' ? 'Enregistré' : st === 'disk' ? 'Enregistré · disque' : st === 'error' ? 'Non enregistré' : 'Modifié';
+    if (st !== 'disk') el.removeAttribute('title');
   }
-  function scheduleSave() { setStatus('dirty'); clearTimeout(saveT); saveT = setTimeout(saveNow, 700); }
+  function scheduleSave() { setStatus('dirty'); Disk.dirty = true; clearTimeout(saveT); saveT = setTimeout(saveNow, 700); }
   function saveNow() {
     clearTimeout(saveT);
     if (!script) return;
@@ -353,7 +356,79 @@
       script.pages = D.pag ? Math.max(1, D.pag.pages.length) : 1;
     }
     setStatus(Store.putScript(script) ? 'saved' : 'error');
+    Disk.check();
   }
+
+  /* ───────── Enregistrement automatique sur le disque ─────────
+     Réglage « Enregistrement auto sur le disque » : le document est réécrit dans un vrai fichier
+     (scénario → .fountain, bible → .md) dès que 10 mots ont été ajoutés ou supprimés depuis la dernière écriture,
+     puis à la fermeture du document ou de l'app. L'enregistrement interne continue en parallèle. */
+  const Disk = {
+    STEP: 10, dir: '', base: null, baseId: null, dirty: false, busy: null,
+    async init() {
+      if (!TAURI) return;
+      try { this.dir = S.diskDir || await invoke('autosave_default_dir'); } catch (e) { console.warn(e); }
+    },
+    on: () => !!(TAURI && S.diskSave && script),
+    words(doc) {
+      const txt = [];
+      if (doc.kind === 'bible') {
+        txt.push(doc.title);
+        doc.sections.forEach(sec => { txt.push(sec.title, sec.body); (sec.items || []).forEach(it => txt.push(it.name, it.role, it.desc, it.caption)); });
+      } else doc.blocks.forEach(b => txt.push(b.x));
+      const m = new Map();
+      for (const w of Rich.plain(txt.filter(Boolean).join('\n')).toLowerCase().match(/[\p{L}\p{N}’']+/gu) || []) m.set(w, (m.get(w) || 0) + 1);
+      return m;
+    },
+    /** Nombre de mots ajoutés + supprimés depuis la dernière écriture */
+    delta(cur) {
+      if (!this.base || this.baseId !== script.id) return Infinity;
+      let d = 0;
+      for (const [w, n] of cur) d += Math.abs(n - (this.base.get(w) || 0));
+      for (const [w, n] of this.base) if (!cur.has(w)) d += n;
+      return d;
+    },
+    /** Point de départ du compteur à l'ouverture d'un document */
+    start() {
+      this.dirty = false; this.base = null; this.baseId = null;
+      if (!script) return;
+      this.base = this.words(script); this.baseId = script.id;
+      if (this.on() && !script.diskPath) this.write();
+    },
+    check() {
+      if (!this.on()) return;
+      if (this.delta(this.words(script)) >= this.STEP) this.write();
+    },
+    flush() { return this.on() && (this.dirty || !script.diskPath) ? this.write() : Promise.resolve(); },
+    async write() {
+      const doc = script;
+      if (!this.on()) return;
+      if (this.busy) await this.busy;
+      const job = (async () => {
+        if (!this.dir) await this.init();
+        const bible = doc.kind === 'bible';
+        const content = bible ? Bible.toMarkdown(doc) : Fountain.stringify(doc);
+        const words = this.words(doc);
+        try {
+          const path = await invoke('autosave_write', {
+            dir: this.dir, name: fileBase(doc.title), ext: bible ? 'md' : 'fountain', content, prev: doc.diskPath || null,
+          });
+          if (path !== doc.diskPath) { doc.diskPath = path; Store.putScript(doc); }
+          if (doc === script) {
+            this.base = words; this.baseId = doc.id; this.dirty = false;
+            if (!$('#status').classList.contains('dirty')) { setStatus('disk'); $('#status').title = path; }
+          }
+        } catch (e) {
+          console.warn('Lueur: enregistrement sur le disque impossible', e);
+          toast('Enregistrement sur le disque impossible : ' + e);
+        }
+      })();
+      this.busy = job;
+      await job;
+      if (this.busy === job) this.busy = null;
+    },
+    short: p => String(p || '').replace(/^\/Users\/[^/]+/, '~'),
+  };
 
   /* ───────── Export / import ───────── */
   function toast(msg) {
@@ -488,6 +563,13 @@
       ${sw('board', 'Notes et image à droite')}
       ${sw('autoUpdate', 'Mises à jour automatiques')}
       <div class="sep"></div>
+      <label class="row${TAURI ? '' : ' off'}"><span>Enregistrement auto sur le disque</span><input type="checkbox" class="switch" data-set="diskSave" ${S.diskSave && TAURI ? 'checked' : ''}${TAURI ? '' : ' disabled'}></label>
+      <div class="set-note">${TAURI
+        ? 'Écrit un fichier <b>.fountain</b> (scénario) ou <b>.md</b> (bible) dès que 10 mots ont été ajoutés ou supprimés.'
+        : 'Disponible dans l’app installée.'}</div>
+      <div class="row disk-row ${S.diskSave && TAURI ? '' : 'hidden'}"><span class="disk-path" title="${esc(Disk.dir)}">${esc(Disk.short(Disk.dir) || '…')}</span>
+        <span class="disk-btns"><button class="btn small" id="diskPick">Changer…</button><button class="btn small" id="diskShow">Afficher</button></span></div>
+      <div class="sep"></div>
       <div class="keys">
         <div><kbd>⇥</kbd>changer d’élément (action → personnage…)</div>
         <div><kbd>↵</kbd>élément suivant · <kbd>Échap</kbd>fermer les suggestions</div>
@@ -544,7 +626,45 @@
         else console.warn('Lueur: mise à jour en arrière-plan impossible', e);
       } finally { this.busy = false; }
     },
-    restart() { saveNow(); invoke('restart_app'); },
+    async restart() { saveNow(); await Disk.flush(); invoke('restart_app'); },
+  };
+
+  /* ───────── Barre de mise en forme (apparaît sur une sélection) ───────── */
+  const Fmt = {
+    el: null, ctx: null, raf: 0,
+    init() {
+      this.el = $('#fmtBar');
+      this.el.addEventListener('mousedown', e => e.preventDefault());
+      this.el.addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.fmt) (this.ctx === 'script' ? Editor : Bible).format(b.dataset.fmt);
+        else if (b.dataset.pre) Bible.prefix(b.dataset.pre);
+        this.update();
+      });
+      document.addEventListener('selectionchange', () => { cancelAnimationFrame(this.raf); this.raf = requestAnimationFrame(() => this.update()); });
+      $('#scroller').addEventListener('scroll', () => this.hide(), { passive: true });
+      window.addEventListener('resize', () => this.hide());
+    },
+    hide() { this.el.classList.add('hidden'); },
+    update() {
+      const sel = document.getSelection();
+      if (!script || !sel || !sel.rangeCount || sel.isCollapsed) return this.hide();
+      const r = sel.getRangeAt(0), n = r.commonAncestorContainer, el = n.nodeType === 3 ? n.parentNode : n;
+      const ctx = $('#script').contains(el) ? 'script' : el.closest && el.closest('#bibleDoc .md') ? 'bible' : null;
+      if (!ctx || !r.toString().trim()) return this.hide();
+      this.ctx = ctx;
+      const st = (ctx === 'script' ? Editor : Bible).formatState();
+      this.el.classList.toggle('md', ctx === 'bible');
+      $$('[data-fmt]', this.el).forEach(b => b.classList.toggle('on', !!st[b.dataset.fmt]));
+      this.el.classList.remove('hidden');
+      const rs = r.getClientRects(), bb = r.getBoundingClientRect(), first = rs.length ? rs[0] : bb;
+      const w = this.el.offsetWidth, h = this.el.offsetHeight;
+      let top = first.top - h - 10;
+      if (top < 56) top = bb.bottom + 10;
+      this.el.style.top = Math.round(top) + 'px';
+      this.el.style.left = Math.round(Math.max(8, Math.min(innerWidth - w - 8, (bb.left + bb.right) / 2 - w / 2))) + 'px';
+    },
   };
 
   /* ───────── Lecteur ───────── */
@@ -769,13 +889,30 @@
 
     // Réglages
     const sp = $('#settingsPop');
-    sp.addEventListener('click', e => { if (e.target.id === 'checkUpdate') { closePops(); Updater.check(false); } });
+    sp.addEventListener('click', async e => {
+      if (e.target.id === 'checkUpdate') { closePops(); Updater.check(false); }
+      else if (e.target.id === 'diskShow') invoke('reveal_path', { path: (script && script.diskPath) || Disk.dir });
+      else if (e.target.id === 'diskPick') {
+        const dir = await invoke('pick_folder');
+        if (!dir || dir === Disk.dir) return;
+        S.diskDir = dir; Disk.dir = dir; Store.saveSettings(S);
+        if (script) { delete script.diskPath; await Disk.write(); }
+        renderSettings();
+      }
+    });
     sp.addEventListener('change', e => {
       const t = e.target;
       if (t.id === 'setFont') { S.font = t.value; $('#customRow').classList.toggle('hidden', S.font !== '__custom'); applySettings(); fontsChanged(); }
       else if (t.id === 'setLang') { S.lang = t.value; applySettings(); refreshNow(); }
       else if (t.id === 'setPaper') { S.paper = t.value; applySettings(); refreshNow(); }
-      else if (t.dataset.set) { S[t.dataset.set] = t.checked; applySettings(); if (t.dataset.set === 'sceneNumbers') refreshNow(); }
+      else if (t.dataset.set) {
+        S[t.dataset.set] = t.checked; applySettings();
+        if (t.dataset.set === 'sceneNumbers') refreshNow();
+        if (t.dataset.set === 'diskSave') {
+          $('.disk-row', sp).classList.toggle('hidden', !t.checked);
+          if (t.checked) Disk.init().then(() => { $('.disk-path', sp).textContent = Disk.short(Disk.dir); $('.disk-path', sp).title = Disk.dir; if (script) { saveNow(); Disk.write(); } });
+        }
+      }
     });
     sp.addEventListener('input', e => {
       const t = e.target;
@@ -786,7 +923,12 @@
     // Clavier global
     document.addEventListener('keydown', e => {
       const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
-      if (mod && k === 's') { e.preventDefault(); saveNow(); toast('Enregistré'); return; }
+      if (mod && k === 's') {
+        e.preventDefault(); saveNow();
+        if (Disk.on()) Disk.write().then(() => toast(script && script.diskPath ? `Enregistré : ${script.diskPath.split('/').pop()}` : 'Enregistré'));
+        else toast('Enregistré');
+        return;
+      }
       if (mod && k === 'n') { e.preventDefault(); if (script) showLibrary(); showNewDoc(); return; }
       if (e.key === 'Escape' && !$('#newDoc').classList.contains('hidden')) { $('#newDoc').classList.add('hidden'); return; }
       if (!script) return;
@@ -803,7 +945,7 @@
     });
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && !TAURI) document.body.classList.remove('focus'); });
     window.addEventListener('beforeunload', saveNow);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { saveNow(); Disk.flush(); } });
     window.addEventListener('resize', () => { if (script && script.kind !== 'bible') renderPageMarks(); });
   }
 
@@ -852,6 +994,8 @@
       toast,
     });
     Player.init();
+    Fmt.init();
+    Disk.init();
     bind();
     Updater.init();
     if (!S.seeded) {

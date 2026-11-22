@@ -148,6 +148,16 @@
 
 <div id="ac" class="hidden" role="listbox"></div>
 <div id="typeMenu" class="pop hidden"></div>
+<div id="fmtBar" class="hidden" role="toolbar" aria-label="Mise en forme">
+  <button data-fmt="b" title="Gras (⌘B)"><b>B</b></button>
+  <button data-fmt="i" title="Italique (⌘I)"><i>I</i></button>
+  <button data-fmt="u" title="Souligné (⌘U)"><u>U</u></button>
+  <button data-fmt="s" title="Barré (⌘⇧X)"><s>S</s></button>
+  <span class="fb-sep md-only"></span>
+  <button class="md-only" data-pre="h" title="Titre">H</button>
+  <button class="md-only" data-pre="li" title="Liste">•</button>
+  <button class="md-only" data-pre="q" title="Citation">❝</button>
+</div>
 <div id="exportMenu" class="pop hidden">
   <button class="item script-only" data-export="fountain"><span>Fountain</span><small>.fountain</small></button>
   <button class="item" data-export="pdf"><span>PDF</span><small>.pdf</small></button>
@@ -185,6 +195,7 @@
 
 <script src="js/store.js"></script>
 <script src="js/templates.js"></script>
+<script src="js/rich.js"></script>
 <script src="js/images.js"></script>
 <script src="js/fountain.js"></script>
 <script src="js/paginate.js"></script>

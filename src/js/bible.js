@@ -17,14 +17,19 @@ const Bible = (() => {
     const img = (it, cls) => `<div class="bimg ${cls}${it.img ? '' : ' empty'}" data-pick="${it.id}" title="Cliquez ou glissez une image">` +
       `${it.img ? `<img data-img="${esc(it.img)}" alt="">` : '<span>+ Image</span>'}</div>`;
     const ce = (f, v, ph, cls = '') => `<div class="${cls}" contenteditable="plaintext-only" data-if="${f}" data-ph="${esc(ph)}">${esc(v || '')}</div>`;
+    const md = (f, v, ph, cls = '') => `<div class="${cls} md" contenteditable="plaintext-only" data-if="${f}" data-ph="${esc(ph)}">${Rich.md(v)}</div>`;
     if (s.kind === 'characters') {
-      return `<div class="bchars">${s.items.map(it => `
+      const photos = s.photos !== false;
+      const portrait = it => !photos ? '' : it.img
+        ? `<div class="bimg portrait" data-pick="${it.id}" title="Cliquez ou glissez une image pour la remplacer"><img data-img="${esc(it.img)}" alt=""><button class="bimg-x" data-noimg="${it.id}" title="Retirer l’image">×</button></div>`
+        : img(it, 'portrait');
+      return `<div class="bchars${photos ? '' : ' nophoto'}">${s.items.map(it => `
         <div class="bchar" data-item="${it.id}">
-          ${img(it, 'portrait')}
+          ${portrait(it)}
           <div class="bchar-t">
             ${ce('name', it.name, 'Nom', 'bchar-name')}
             ${ce('role', it.role, 'Rôle · âge', 'bchar-role')}
-            ${ce('desc', it.desc, 'Caractère, désir, peur, arc…', 'bchar-desc')}
+            ${md('desc', it.desc, 'Caractère, désir, peur, arc…', 'bchar-desc')}
           </div>${del(it.id)}
         </div>`).join('')}</div>
         <button class="badd-item" data-additem>+ Personnage</button>`;
@@ -42,7 +47,7 @@ const Bible = (() => {
         </div>`).join('')}
         <button class="bsw-add" data-additem title="Ajouter une couleur">+</button></div>`;
     }
-    return `<div class="btext" contenteditable="plaintext-only" data-f="body" data-ph="${esc(s.hint || 'Écrivez ici…')}">${esc(s.body || '')}</div>`;
+    return `<div class="btext md" contenteditable="plaintext-only" data-f="body" data-ph="${esc(s.hint || 'Écrivez ici…')}">${Rich.md(s.body)}</div>`;
   }
   function sectionHTML(s, i) {
     return `<section class="bsec k-${s.kind}" id="sec-${s.id}" data-id="${s.id}">
@@ -50,6 +55,7 @@ const Bible = (() => {
         <span class="bsec-n">${i + 1}</span>
         <h2 contenteditable="plaintext-only" data-f="title" data-ph="Titre de la section" spellcheck="false">${esc(s.title)}</h2>
         <div class="bsec-tools">
+          ${s.kind === 'characters' ? `<button class="bphotos${s.photos === false ? '' : ' on'}" data-photos title="Fiches avec ou sans photo">Photos</button>` : ''}
           <button data-move="-1" title="Monter">↑</button><button data-move="1" title="Descendre">↓</button>
           <button data-delsec title="Supprimer la section">×</button>
         </div>
@@ -172,6 +178,109 @@ const Bible = (() => {
     if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); const h = $('h2', el); setTimeout(() => { h.focus(); document.getSelection().selectAllChildren(h); }, 350); }
   }
 
+  /* ───────── Champs Markdown : rendu en direct, historique, mise en forme ───────── */
+  /** Relit le texte du champ et, si besoin, redessine les marques en gardant la sélection */
+  function sync(t, composing) {
+    const text = Rich.textIn(t);
+    if (!composing) {
+      const want = Rich.md(text);
+      if (t.innerHTML !== want) {
+        const sel = Rich.getSel(t);
+        t.innerHTML = want;
+        if (sel) Rich.setSel(t, sel.a, sel.z);
+      }
+    }
+    return text;
+  }
+  function commit(t, text) {
+    const s = secOf(t);
+    if (!s) return;
+    if (t.dataset.f === 'body') s.body = text;
+    else { const it = itemOf(s, t); if (it) it[t.dataset.if] = text; }
+    changed(false);
+  }
+  function put(t, text, a, z = a) {
+    t.innerHTML = Rich.md(text);
+    if (document.activeElement !== t) t.focus({ preventScroll: true });
+    Rich.setSel(t, a, z);
+    commit(t, text);
+  }
+  const hist = { undo: [], redo: [], t: 0, kind: '', key: '' };
+  function keyOf(t) {
+    const sec = t.closest('[data-id]'), it = t.closest('[data-item]');
+    return [sec ? sec.dataset.id : '', it ? it.dataset.item : '', t.dataset.f || t.dataset.if].join('|');
+  }
+  function elOf(key) {
+    const [sid, iid, f] = key.split('|');
+    const sec = $(`#sec-${sid}`, root);
+    const scope = sec && (iid ? $(`[data-item="${iid}"]`, sec) : sec);
+    return scope ? $(`.md[data-f="${f}"], .md[data-if="${f}"]`, scope) : null;
+  }
+  function snap(t, kind, force) {
+    const key = keyOf(t), now = Date.now();
+    if (force || key !== hist.key || kind !== hist.kind || now - hist.t > 1200) {
+      hist.undo.push({ key, text: Rich.textIn(t), sel: Rich.getSel(t) || { a: 0, z: 0 } });
+      if (hist.undo.length > 300) hist.undo.shift();
+      hist.redo.length = 0;
+    }
+    hist.key = force ? '' : key; hist.kind = force ? '' : kind; hist.t = now;
+  }
+  function step(from, to) {
+    while (from.length) {
+      const st = from.pop(), el = elOf(st.key);
+      if (!el) continue;
+      to.push({ key: st.key, text: Rich.textIn(el), sel: Rich.getSel(el) || st.sel });
+      put(el, st.text, st.sel.a, st.sel.z);
+      hist.key = ''; return;
+    }
+  }
+  const undo = () => step(hist.undo, hist.redo);
+  const redo = () => step(hist.redo, hist.undo);
+  /** Champ Markdown qui contient la sélection */
+  function active() {
+    const sel = document.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const n = sel.getRangeAt(0).startContainer;
+    const el = (n.nodeType === 3 ? n.parentNode : n).closest && (n.nodeType === 3 ? n.parentNode : n).closest('.md');
+    return el && root.contains(el) ? el : null;
+  }
+  function format(kind) {
+    const t = active(), sel = t && Rich.getSel(t);
+    if (!sel || sel.a === sel.z) return false;
+    const text = Rich.textIn(t), r = Rich.toggle(text, sel.a, sel.z, kind);
+    if (!r) return false;
+    snap(t, 'format', true);
+    put(t, r.text, r.a, r.z);
+    return true;
+  }
+  function prefix(kind) {
+    const t = active(), sel = t && Rich.getSel(t);
+    if (!sel) return false;
+    const r = Rich.linePrefix(Rich.textIn(t), sel.a, sel.z, kind);
+    if (!r) return false;
+    snap(t, 'format', true);
+    put(t, r.text, r.a, r.z);
+    return true;
+  }
+  function formatState() {
+    const t = active(), sel = t && Rich.getSel(t);
+    return sel && sel.a !== sel.z ? Rich.stateAt(Rich.textIn(t), sel.a, sel.z) : {};
+  }
+  /** Entrée : nouvelle ligne, en continuant la liste en cours (ou en la terminant sur un élément vide) */
+  function newline(t) {
+    const text = Rich.textIn(t), sel = Rich.getSel(t) || { a: text.length, z: text.length };
+    snap(t, 'enter', true);
+    const ls = text.lastIndexOf('\n', sel.a - 1) + 1, line = text.slice(ls, sel.a);
+    const m = sel.a === sel.z ? /^(\s*)([-*•+]|(\d+)([.)]))(\s+)/.exec(line) : null;
+    if (m && !line.slice(m[0].length).trim() && !text.slice(sel.a).split('\n')[0].trim()) {
+      put(t, text.slice(0, ls) + text.slice(sel.a), ls);
+      return;
+    }
+    let ins = '\n';
+    if (m) ins += m[1] + (m[3] ? (+m[3] + 1) + m[4] : m[2]) + m[5];
+    put(t, text.slice(0, sel.a) + ins + text.slice(sel.z), sel.a + ins.length);
+  }
+
   /* ───────── Événements ───────── */
   function bind() {
     root.addEventListener('input', e => {
@@ -194,11 +303,31 @@ const Bible = (() => {
       const s = secOf(t);
       if (!s) return;
       if (t.dataset.f === 'title') { s.title = t.textContent.replace(/\n/g, ' '); changed(true); return; }
-      if (t.dataset.f === 'body') { s.body = t.textContent; changed(false); return; }
+      if (t.classList.contains('md')) { commit(t, sync(t, e.isComposing)); return; }
       if (t.dataset.if) { const it = itemOf(s, t); if (it) { it[t.dataset.if] = t.textContent; changed(false); } }
+    });
+    root.addEventListener('compositionend', e => { const t = e.target; if (t.classList && t.classList.contains('md')) commit(t, sync(t)); });
+    root.addEventListener('beforeinput', e => {
+      const t = e.target;
+      if (!t.classList || !t.classList.contains('md')) return;
+      const k = e.inputType;
+      if (k === 'historyUndo') { e.preventDefault(); undo(); return; }
+      if (k === 'historyRedo') { e.preventDefault(); redo(); return; }
+      if (k.startsWith('format')) { e.preventDefault(); const f = { formatBold: 'b', formatItalic: 'i', formatUnderline: 'u', formatStrikeThrough: 's' }[k]; if (f) format(f); return; }
+      snap(t, k.startsWith('delete') ? 'del' : 'type');
     });
     root.addEventListener('keydown', e => {
       const t = e.target;
+      if (t.classList && t.classList.contains('md')) {
+        const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+        if (mod && !e.altKey && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+        if (mod && !e.altKey) {
+          const f = !e.shiftKey ? { b: 'b', i: 'i', u: 'u' }[k] : k === 'x' ? 's' : null;
+          if (f) { e.preventDefault(); format(f); return; }
+        }
+        if (e.key === 'Enter' && !e.isComposing && !mod) { e.preventDefault(); newline(t); return; }
+        return;
+      }
       const single = t.dataset.f === 'title' || ['title', 'genre', 'credit', 'author'].includes(t.dataset.meta) || ['name', 'role', 'caption'].includes(t.dataset.if);
       if (e.key === 'Enter' && single) { e.preventDefault(); t.blur(); }
     });
@@ -229,6 +358,14 @@ const Bible = (() => {
         if (it && it.img) Images.del(it.img);
         s.items = s.items.filter(x => x !== it);
         rerenderSection(s); changed(true); return;
+      }
+      if (t.closest('[data-photos]')) { s.photos = s.photos === false; rerenderSection(s); changed(true); return; }
+      const ni = t.closest('[data-noimg]');
+      if (ni) {
+        e.stopPropagation();
+        const it = s.items.find(x => x.id === ni.dataset.noimg);
+        if (it && it.img) { Images.del(it.img); it.img = null; rerenderSection(s); changed(true); }
+        return;
       }
       if (t.closest('[data-additem]')) { addItem(s); return; }
       if (t.closest('[data-addimgs]')) { pick(true, files => addImages(s, files)); return; }
@@ -273,11 +410,11 @@ const Bible = (() => {
     for (const s of b.sections) {
       if (s.kind === 'text' ? !String(s.body || '').trim() : !(s.items || []).length) continue;
       out.push('', '---', '', `## ${s.title || 'Sans titre'}`, '');
-      if (s.kind === 'text') out.push(String(s.body || '').trim());
+      if (s.kind === 'text') out.push(Rich.toMarkdown(String(s.body || '').trim()));
       else if (s.kind === 'characters') s.items.forEach(it => {
         out.push(`### ${it.name || 'Sans nom'}`);
         if (it.role) out.push(`*${it.role}*`);
-        if (it.desc) out.push('', it.desc);
+        if (it.desc) out.push('', Rich.toMarkdown(it.desc));
         out.push('');
       });
       else if (s.kind === 'gallery') s.items.forEach((it, i) => out.push(`- Image ${i + 1}${it.caption ? ' — ' + it.caption : ''}`));
@@ -306,6 +443,6 @@ const Bible = (() => {
     addSection,
     syncTitle(t) { const el = $('[data-meta="title"]', root); if (el && el.textContent !== t) el.textContent = t; },
     stats: () => (doc ? stats() : null),
-    toMarkdown, pdf, KIND,
+    toMarkdown, pdf, KIND, format, prefix, formatState, isActive: () => !!active(),
   };
 })();

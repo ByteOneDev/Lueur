@@ -38,7 +38,7 @@ const Paginate = (() => {
     const pages = [[]];
     const startPage = new Array(blocks.length).fill(0);
     const cost = new Array(blocks.length).fill(0);
-    const lines = blocks.map(b => wrap(UPPER.has(b.t) ? String(b.x).toUpperCase() : String(b.x), W[b.t] || 60));
+    const lines = blocks.map(b => { const x = Rich.plain(b.x); return wrap(UPPER.has(b.t) ? x.toUpperCase() : x, W[b.t] || 60); });
     let used = 0, speaker = '';
     const br = () => { pages.push([]); used = 0; };
     const place = (it, i) => {

@@ -1,6 +1,6 @@
 [package]
 name = "lueur"
-version = "0.3.1"
+version = "0.4.0"
 description = "Lueur — écriture de scénario"
 edition = "2021"
 

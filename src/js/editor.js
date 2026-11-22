@@ -24,12 +24,15 @@ const Editor = (() => {
 
   let root = null, H = {};
   const hist = { undo: [], redo: [], t: 0, kind: '' };
-  let lastBlock = null;
+  let lastBlock = null, curEl = null;
 
   /* ───────── DOM helpers ───────── */
   const textOf = d => (d.textContent || '').replace(/ /g, ' ');
-  function setText(d, x) { d.textContent = x; if (!x) d.appendChild(document.createElement('br')); }
-  function setType(d, t) { d.className = 'b ' + t; d.dataset.t = t; d._c = undefined; }
+  function setText(d, x) {
+    if (x && Rich.has(x)) { d.innerHTML = Rich.inline(x); return; }
+    d.textContent = x; if (!x) d.appendChild(document.createElement('br'));
+  }
+  function setType(d, t) { d.className = 'b ' + t + (d === curEl ? ' cur' : ''); d.dataset.t = t; d._c = undefined; }
   function mk(t, x) { const d = document.createElement('div'); setType(d, ORDER.includes(t) ? t : 'action'); setText(d, x || ''); return d; }
   function blockOf(node) {
     let n = node && node.nodeType === 3 ? node.parentNode : node;
@@ -91,7 +94,7 @@ const Editor = (() => {
     const f = document.createDocumentFragment();
     (list && list.length ? list : [{ t: 'action', x: '' }]).forEach(b => f.appendChild(mk(b.t, b.x)));
     root.replaceChildren(f);
-    lastBlock = null;
+    lastBlock = null; curEl = null;
     decorate();
   }
   function load(list) { hist.undo.length = 0; hist.redo.length = 0; hist.kind = ''; AC.close(); render(list); }
@@ -134,6 +137,15 @@ const Editor = (() => {
     if (s) new Set([s.sb, s.eb]).forEach(cleanBlock);
   }
   function cleanBlock(b) {
+    const x0 = textOf(b);
+    if (x0 && Rich.has(x0)) {
+      // Texte mis en forme : le DOM doit correspondre exactement au rendu des marques
+      if (b.innerHTML.replace(/&nbsp;/g, ' ') !== Rich.inline(x0)) {
+        const c = caretIn(b); setText(b, x0);
+        if (c != null) setCaret(b, Math.min(c, x0.length));
+      }
+      return;
+    }
     const kids = [...b.childNodes];
     const hasEl = kids.some(c => c.nodeType === 1 && c.tagName !== 'BR');
     const x = textOf(b);
@@ -243,11 +255,59 @@ const Editor = (() => {
 
   function changed(kind) { decorate(); if (H.onChange) H.onChange(kind); }
 
+  /* ───────── Mise en forme (gras, italique, souligné, barré) ───────── */
+  function selBlocks(s) {
+    const list = [];
+    for (let n = s.sb; n; n = n.nextElementSibling) { list.push(n); if (n === s.eb) break; }
+    return list;
+  }
+  function joinedSel(s) {
+    const list = selBlocks(s), texts = list.map(textOf);
+    let z = s.eo;
+    for (let i = 0; i < list.length - 1; i++) z += texts[i].length + 1;
+    return { list, texts, a: s.so, z };
+  }
+  function setRange(b1, o1, b2, o2) {
+    const r = document.createRange(), p = rangeAt(b1, o1), q = rangeAt(b2, o2);
+    r.setStart(p.startContainer, p.startOffset); r.setEnd(q.startContainer, q.startOffset);
+    const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  }
+  function format(kind) {
+    const s = getSel();
+    if (!s || s.collapsed) return false;
+    const j = joinedSel(s);
+    const r = Rich.toggle(j.texts.join('\n'), j.a, j.z, kind, false);
+    if (!r) return false;
+    snap('format', true);
+    const nt = r.text.split('\n');
+    j.list.forEach((b, i) => { if (nt[i] !== j.texts[i]) setText(b, nt[i]); });
+    const loc = o => { let i = 0; while (i < nt.length - 1 && o > nt[i].length) { o -= nt[i].length + 1; i++; } return [j.list[i], o]; };
+    const [b1, o1] = loc(r.a), [b2, o2] = loc(r.z);
+    markCur(b1);
+    setRange(b1, o1, b2, o2);
+    changed('format');
+    return true;
+  }
+  function formatState() {
+    const s = getSel();
+    if (!s || s.collapsed) return {};
+    const j = joinedSel(s);
+    return Rich.stateAt(j.texts.join('\n'), j.a, j.z, false);
+  }
+  const FMT = { formatBold: 'b', formatItalic: 'i', formatUnderline: 'u', formatStrikeThrough: 's' };
+  function markCur(b) {
+    if (curEl === b) return;
+    if (curEl) curEl.classList.remove('cur');
+    curEl = b || null;
+    if (curEl) curEl.classList.add('cur');
+  }
+
   /* ───────── Événements ───────── */
   function onBeforeInput(e) {
     const t = e.inputType;
     if (t === 'historyUndo') { e.preventDefault(); undo(); return; }
     if (t === 'historyRedo') { e.preventDefault(); redo(); return; }
+    if (t.startsWith('format')) { e.preventDefault(); if (FMT[t]) format(FMT[t]); return; }
     const s = getSel();
     if (!s) return;
     if (t === 'insertParagraph' || t === 'insertLineBreak') {
@@ -294,6 +354,11 @@ const Editor = (() => {
     }
     if (mod && !e.altKey && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (mod && !e.altKey) {
+      const k = e.key.toLowerCase();
+      const f = !e.shiftKey ? { b: 'b', i: 'i', u: 'u' }[k] : k === 'x' ? 's' : null;
+      if (f) { e.preventDefault(); format(f); return; }
+    }
     if (mod && /^[1-6]$/.test(e.key)) { e.preventDefault(); changeType(curBlock(), ORDER[+e.key - 1]); return; }
     if (e.key === 'Tab' && !mod && !e.altKey) {
       e.preventDefault();
@@ -364,7 +429,8 @@ const Editor = (() => {
     selRaf = requestAnimationFrame(() => {
       selRaf = 0;
       const s = getSel();
-      if (!s) return;
+      if (!s) { if (document.activeElement !== root) markCur(null); return; }
+      markCur(s.sb);
       if (AC.isOpen() && (s.sb !== AC.b || !s.collapsed || s.so < AC.start)) AC.close();
       if (s.sb !== lastBlock) { lastBlock = s.sb; AC.suppressed = false; }
       if (H.onCaret) H.onCaret(s.sb, Array.prototype.indexOf.call(root.children, s.sb));
@@ -511,7 +577,7 @@ const Editor = (() => {
   }
 
   return {
-    init, load, blocks, decorate, focusBlock, focusEnd, replaceAll, ORDER, LABEL,
+    init, load, blocks, decorate, focusBlock, focusEnd, replaceAll, ORDER, LABEL, format, formatState,
     root: () => root,
     setType: t => changeType(lastBlock && lastBlock.isConnected ? lastBlock : curBlock(), t),
     current: () => (lastBlock && lastBlock.isConnected ? lastBlock : null),

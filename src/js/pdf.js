@@ -113,6 +113,19 @@ const PDF = (() => {
       W, H, adv,
       cw: size => adv * size / 1000,
       text: (x, y, s, bold, size = 12) => `BT /F${bold ? 2 : 1} ${size} Tf 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfStr(s)} Tj ET`,
+      /** Ligne mise en forme : [{ s, f: {b,i,u,s} }] — italique incliné, souligné et barré tracés */
+      rich(x, y, segs, size = 12, bold = false) {
+        const cw = adv * size / 1000, out = [];
+        let cx = x;
+        for (const g of segs) {
+          const w = g.s.length * cw;
+          if (g.s.trim()) out.push(`BT /F${bold || g.f.b ? 2 : 1} ${size} Tf ${g.f.i ? '1 0 0.21 1' : '1 0 0 1'} ${cx.toFixed(2)} ${y.toFixed(2)} Tm ${pdfStr(g.s)} Tj ET`);
+          if (g.f.u) out.push(`${cx.toFixed(2)} ${(y - size * .15).toFixed(2)} ${w.toFixed(2)} ${(size * .05).toFixed(2)} re f`);
+          if (g.f.s) out.push(`${cx.toFixed(2)} ${(y + size * .28).toFixed(2)} ${w.toFixed(2)} ${(size * .05).toFixed(2)} re f`);
+          cx += w;
+        }
+        return out.join('\n');
+      },
       addPage(ops) {
         const data = enc.encode(ops.join('\n'));
         const c = alloc(), p = alloc();
@@ -187,6 +200,9 @@ const PDF = (() => {
       doc.addPage(ops);
     }
 
+    // Lignes mises en forme (gras, italique, souligné, barré), découpées exactement comme la pagination
+    const UP = new Set(['scene', 'character', 'transition']);
+    const rl = script.blocks.map(b => (Rich.has(b.x) ? Rich.wrap(b.x, Paginate.W[b.t] || 60, UP.has(b.t)) : null));
     let sceneN = 0;
     pag.pages.forEach((pg, pi) => {
       const ops = [];
@@ -202,9 +218,11 @@ const PDF = (() => {
             ops.push(text(L + BODY + 22, baseline(row), s));
           }
         }
+        const rich = !it.cont && rl[it.i] ? rl[it.i].slice(it.off, it.off + it.lines.length) : null;
         it.lines.forEach((ln, k) => {
           const x = it.t === 'transition' ? L + BODY - ln.length * CW : L + (Paginate.INDENT[it.t] || 0) * U;
-          ops.push(text(x, baseline(row + k), ln, it.t === 'scene'));
+          if (rich && rich[k] && Rich.lineText(rich[k]) === ln) ops.push(doc.rich(x, baseline(row + k), rich[k], 12, it.t === 'scene'));
+          else ops.push(text(x, baseline(row + k), ln, it.t === 'scene'));
         });
         row += it.lines.length;
         if (it.more) { ops.push(text(L + 22 * U, baseline(row), MORE)); row++; }
@@ -220,7 +238,7 @@ const PDF = (() => {
     const n = m ? parseInt(m[1], 16) : 0x888888;
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => (v / 255).toFixed(3)).join(' ');
   };
-  const plain = s => String(s || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[^*\w])[*_](\S(?:.*?\S)?)[*_](?=$|[^*\w])/g, '$1$2');
+  const plain = s => Rich.plain(s);
 
   /**
    * @param bible  bible Lueur
@@ -241,8 +259,8 @@ const PDF = (() => {
     const ensure = h => { if (y - h < M) flush(); };
     const chars = size => Math.max(10, Math.floor(CW / doc.cw(size)));
     const para = (s, { size = 10.5, lead = 15, bold = false, color = INK, x = M, width = CW } = {}) => {
-      const lines = Paginate.wrap(plain(s), Math.max(8, Math.floor(width / doc.cw(size))));
-      for (const ln of lines) { ensure(lead); y -= lead; if (ln) ops.push(color, doc.text(x, y + 3, ln, bold, size)); }
+      const lines = Rich.wrap(s, Math.max(8, Math.floor(width / doc.cw(size))));
+      for (const ln of lines) { ensure(lead); y -= lead; if (ln.length) ops.push(color, doc.rich(x, y + 3, ln, size, bold)); }
     };
     const imgs = {};
     const image = id => {
@@ -281,6 +299,14 @@ const PDF = (() => {
         for (const raw of String(sec.body || '').split('\n')) {
           const line = raw.trimEnd();
           if (!line.trim()) { y -= 7; continue; }
+          if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { ensure(16); y -= 8; ops.push(FAINT, `0.6 w ${M} ${y} m ${M + CW} ${y} l S`); y -= 8; continue; }
+          const q = /^>\s?(.*)$/.exec(line);
+          if (q) {
+            const y0 = y, p0 = page;
+            para(q[1], { x: M + 16, width: CW - 16, color: MUTED });
+            if (page === p0) ops.push(FAINT, `1.2 w ${M + 4} ${y0 - 3} m ${M + 4} ${y + 1} l S`);
+            continue;
+          }
           const h = /^#{1,3}\s+(.*)$/.exec(line);
           if (h) { y -= 6; para(h[1], { size: 12, lead: 17, bold: true }); continue; }
           const li = /^\s*[-•*]\s+(.*)$/.exec(line);
@@ -294,7 +320,7 @@ const PDF = (() => {
         }
       } else if (sec.kind === 'characters') {
         for (const it of sec.items) {
-          const im = image(it.img);
+          const im = sec.photos === false ? null : image(it.img);
           const iw = im ? 120 : 0, ih = im ? Math.min(170, iw * im.h / im.w) : 0;
           const tx = M + (im ? iw + 22 : 0), tw = CW - (im ? iw + 22 : 0);
           const nLines = Paginate.wrap(plain(it.desc || ''), Math.floor(tw / doc.cw(10.5))).length;

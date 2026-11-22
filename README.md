@@ -55,7 +55,8 @@ npm run build
   dossier de film, bible vierge.
 
 Une bible est une suite de sections que l'on ajoute, renomme et réordonne librement :
-**texte** (pitch, univers, épisodes… avec `# titres` et `- listes`), **personnages** (fiches avec image),
+**texte** en Markdown (`# titres`, `- listes`, `> citations`, `**gras**`…, rendu en direct),
+**personnages** (fiches avec ou sans photo : bouton *Photos* de la section),
 **galerie d'images** (designs, décors, moodboard — glisser-déposer) et **palette de couleurs**.
 Export **PDF** (couverture, images, nuancier) et **Markdown**. Les images sont stockées dans la base
 interne de l'app (IndexedDB), réduites à 1600 px.
@@ -78,6 +79,13 @@ une ligne en MAJUSCULES suivie de `↵` devient un personnage.
 (le prochain interlocuteur probable en premier), extensions `(OFF)`, `(H.C.)`…, transitions, et noms en
 MAJUSCULES dans l'action. `⇥` ou `↵` pour accepter, `Échap` pour fermer.
 
+## Mise en forme
+
+Sélectionnez du texte : une petite barre propose **gras** (`⌘B`), *italique* (`⌘I`), souligné (`⌘U`) et
+barré (`⌘⇧X`) — plus titre, liste et citation dans les bibles. Le texte reste du texte brut, marqué à la
+manière de Fountain / Markdown (`**gras**`, `*italique*`, `_souligné_`, `~~barré~~`) ; les marques ne
+s'affichent que dans la ligne où l'on écrit. Exports PDF, Fountain et Markdown conservent la mise en forme.
+
 ## Exports
 
 - **Fountain** (`.fountain`) : format standard, ré-importable dans Lueur, Highland, Fade In, Final Draft (via import), etc.
@@ -91,7 +99,11 @@ Police (JetBrains Mono par défaut, Courier Prime, IBM Plex Mono, Space Mono, ou
 taille, langue du scénario (FR/EN : suggestions et mentions), format US Letter / A4, autocomplétion,
 numéros de scène, sons de machine à écrire, tableau notes + image.
 
-Les scénarios sont enregistrés automatiquement sur la machine (stockage local de l'app).
+Les scénarios sont enregistrés en continu dans le stockage interne de l'app. Avec **Enregistrement auto sur
+le disque** (Réglages), chaque document est aussi écrit dans un vrai fichier — `~/Documents/Lueur/Titre.fountain`
+pour un scénario, `Titre.md` pour une bible (dossier modifiable) — dès que 10 mots ont été ajoutés ou
+supprimés, à `⌘S`, et à la fermeture du document. Un fichier existant qui n'appartient pas au document
+n'est jamais écrasé.
 
 ## Structure
 
